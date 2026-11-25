@@ -1,9 +1,17 @@
 import os
 import sqlite3
+import tempfile
 import threading
 from contextlib import contextmanager
 
-DEFAULT_DB_PATH = os.path.join(os.path.dirname(__file__), 'data.db')
+
+def get_default_db_path() -> str:
+    if os.environ.get('VERCEL'):
+        return os.path.join(tempfile.gettempdir(), 'social_publisher.db')
+    return os.path.join(os.path.dirname(__file__), 'data.db')
+
+
+DEFAULT_DB_PATH = get_default_db_path()
 
 DEFAULT_TEMPLATES = [
     {
@@ -65,8 +73,8 @@ DEFAULT_TEMPLATES = [
 class Database:
     """Thread-safe SQLite wrapper supporting both file-backed and :memory: databases."""
 
-    def __init__(self, db_path: str = DEFAULT_DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: str | None = None):
+        self.db_path = db_path or get_default_db_path()
         self._is_memory = db_path == ':memory:'
         self._lock = threading.Lock()
         self._mem_conn = None

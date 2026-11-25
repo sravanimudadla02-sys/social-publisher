@@ -4,8 +4,11 @@ import os
 import tempfile
 import unittest
 
+from PIL import Image
+
 from server.app import create_app
-from server.publishers import extract_metadata, get_platform_config, to_text, validate_post
+from server.db import get_default_db_path
+from server.publishers import _ensure_jpeg_for_instagram, extract_metadata, get_platform_config, to_text, validate_post
 
 
 class PublishersUnitTest(unittest.TestCase):
@@ -58,6 +61,35 @@ class PublishersUnitTest(unittest.TestCase):
         self.assertEqual(cfg['fields']['META_PAGE_TOKEN']['preview'], '••••9876')
         self.assertNotIn('secret_tok_9876', json.dumps(cfg))
 
+    def test_ensure_jpeg_for_instagram_converts_png(self):
+        tmp_dir = tempfile.mkdtemp(prefix='ig-jpg-')
+        try:
+            png_path = os.path.join(tmp_dir, 'sample.png')
+            Image.new('RGBA', (16, 16), (255, 0, 0, 128)).save(png_path, format='PNG')
+            converted_url = _ensure_jpeg_for_instagram(
+                {'image_file': 'sample.png', 'image_url': 'https://demo.example.com/uploads/sample.png', 'upload_dir': tmp_dir},
+                'https://demo.example.com',
+            )
+            self.assertEqual(converted_url, 'https://demo.example.com/uploads/sample-ig.jpg')
+            self.assertTrue(os.path.exists(os.path.join(tmp_dir, 'sample-ig.jpg')))
+        finally:
+            for name in os.listdir(tmp_dir):
+                os.remove(os.path.join(tmp_dir, name))
+            os.rmdir(tmp_dir)
+
+    def test_vercel_env_uses_writable_temp_db_path(self):
+        prev = os.environ.get('VERCEL')
+        os.environ['VERCEL'] = '1'
+        try:
+            db_path = get_default_db_path()
+            self.assertIn('social_publisher.db', db_path)
+            self.assertNotIn(os.path.join('server', 'data.db'), db_path)
+        finally:
+            if prev is None:
+                os.environ.pop('VERCEL', None)
+            else:
+                os.environ['VERCEL'] = prev
+
 
 class FlaskApiIntegrationTest(unittest.TestCase):
     def setUp(self):
@@ -94,6 +126,8 @@ class FlaskApiIntegrationTest(unittest.TestCase):
             'mode': 'live',
             'publicBaseUrl': 'https://demo.example.com',
             'values': {
+                'IG_ACCOUNT_NAME': '@mybrand_ig',
+                'IG_ACCOUNT_URL': 'https://www.instagram.com/mybrand_ig/',
                 'META_PAGE_ID': 'page_999',
                 'META_PAGE_TOKEN': 'super_secret_token_1234',
             },
@@ -101,6 +135,8 @@ class FlaskApiIntegrationTest(unittest.TestCase):
         self.assertEqual(cfg_res.status_code, 200)
         cfg = cfg_res.get_json()
         self.assertEqual(cfg['mode'], 'live')
+        self.assertEqual(cfg['platforms']['instagram']['accountName'], '@mybrand_ig')
+        self.assertEqual(cfg['platforms']['instagram']['accountUrl'], 'https://www.instagram.com/mybrand_ig/')
         self.assertTrue(cfg['platforms']['facebook']['configured'])
         self.assertEqual(cfg['fields']['META_PAGE_TOKEN']['preview'], '••••1234')
         self.assertNotIn('super_secret_token_1234', json.dumps(cfg))

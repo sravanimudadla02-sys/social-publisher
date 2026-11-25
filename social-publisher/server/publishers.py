@@ -10,6 +10,10 @@ PLATFORM_META = {
     'instagram': {
         'key': 'instagram',
         'name': 'Instagram',
+        'defaultAccountName': '@yourbrand',
+        'defaultAccountUrl': 'https://www.instagram.com/',
+        'accountNameEnv': 'IG_ACCOUNT_NAME',
+        'accountUrlEnv': 'IG_ACCOUNT_URL',
         'maxChars': 2200,
         'maxHashtags': 30,
         'requiresImage': True,
@@ -18,6 +22,10 @@ PLATFORM_META = {
     'facebook': {
         'key': 'facebook',
         'name': 'Facebook',
+        'defaultAccountName': 'Your Brand Page',
+        'defaultAccountUrl': 'https://www.facebook.com/',
+        'accountNameEnv': 'FB_ACCOUNT_NAME',
+        'accountUrlEnv': 'FB_ACCOUNT_URL',
         'maxChars': 63206,
         'requiresImage': False,
         'requiredEnv': ['META_PAGE_ID', 'META_PAGE_TOKEN'],
@@ -25,6 +33,10 @@ PLATFORM_META = {
     'gmb': {
         'key': 'gmb',
         'name': 'Google Business Profile',
+        'defaultAccountName': 'Your Storefront · Google',
+        'defaultAccountUrl': 'https://business.google.com/',
+        'accountNameEnv': 'GMB_ACCOUNT_NAME',
+        'accountUrlEnv': 'GMB_ACCOUNT_URL',
         'maxChars': 1500,
         'requiresImage': False,
         'requiredEnv': [
@@ -38,6 +50,10 @@ PLATFORM_META = {
     'linkedin': {
         'key': 'linkedin',
         'name': 'LinkedIn',
+        'defaultAccountName': 'Your Company · LinkedIn',
+        'defaultAccountUrl': 'https://www.linkedin.com/feed/',
+        'accountNameEnv': 'LINKEDIN_ACCOUNT_NAME',
+        'accountUrlEnv': 'LINKEDIN_ACCOUNT_URL',
         'maxChars': 3000,
         'requiresImage': False,
         'requiredEnv': ['LINKEDIN_TOKEN', 'LINKEDIN_AUTHOR_URN'],
@@ -50,6 +66,14 @@ GMB_CTA_TYPES = ['LEARN_MORE', 'BOOK', 'ORDER', 'SHOP', 'SIGN_UP']
 CONFIGURABLE_ENV_KEYS = [
     'PUBLISH_MODE',
     'PUBLIC_BASE_URL',
+    'IG_ACCOUNT_NAME',
+    'IG_ACCOUNT_URL',
+    'FB_ACCOUNT_NAME',
+    'FB_ACCOUNT_URL',
+    'GMB_ACCOUNT_NAME',
+    'GMB_ACCOUNT_URL',
+    'LINKEDIN_ACCOUNT_NAME',
+    'LINKEDIN_ACCOUNT_URL',
     'META_PAGE_ID',
     'META_PAGE_TOKEN',
     'META_IG_USER_ID',
@@ -191,9 +215,14 @@ def get_platform_config(env: dict) -> dict:
     platforms = {}
     for key, meta in PLATFORM_META.items():
         missing_env = [k for k in meta['requiredEnv'] if not env.get(k)]
+        account_name = env.get(meta['accountNameEnv']) or meta['defaultAccountName']
+        raw_url = env.get(meta['accountUrlEnv']) or ''
+        account_url = raw_url if is_valid_http_url(raw_url) else meta['defaultAccountUrl']
         platforms[key] = {
             'key': meta['key'],
             'name': meta['name'],
+            'accountName': account_name,
+            'accountUrl': account_url,
             'maxChars': meta['maxChars'],
             'maxHashtags': meta.get('maxHashtags'),
             'requiresImage': meta['requiresImage'],
@@ -285,6 +314,38 @@ def _publish_facebook(post: dict, env: dict) -> dict:
     return {'id': post_id, 'url': f'https://www.facebook.com/{post_id}'}
 
 
+def _ensure_jpeg_for_instagram(post: dict, base_url: str) -> str:
+    """Instagram Graph API requires JPEG for feed photo URLs; converts PNG/WebP if needed."""
+    image_file = post.get('image_file')
+    image_url = post.get('image_url') or ''
+    if not image_file or os.path.splitext(image_file)[1].lower() in ('.jpg', '.jpeg'):
+        return image_url
+
+    upload_dir = post.get('upload_dir')
+    if not upload_dir:
+        return image_url
+
+    src_path = os.path.join(upload_dir, image_file)
+    jpg_name = f"{os.path.splitext(image_file)[0]}-ig.jpg"
+    jpg_path = os.path.join(upload_dir, jpg_name)
+
+    try:
+        from PIL import Image
+
+        with Image.open(src_path) as img:
+            if img.mode in ('RGBA', 'LA', 'P'):
+                bg = Image.new('RGB', img.size, (255, 255, 255))
+                rgba = img.convert('RGBA')
+                bg.paste(rgba, mask=rgba.split()[3])
+                rgb = bg
+            else:
+                rgb = img.convert('RGB')
+            rgb.save(jpg_path, format='JPEG', quality=92)
+        return f"{base_url.rstrip('/')}/uploads/{jpg_name}"
+    except Exception:
+        return image_url
+
+
 def _publish_instagram(post: dict, env: dict) -> dict:
     _require_env(env, 'META_IG_USER_ID', 'META_PAGE_TOKEN')
     image_url = post.get('image_url')
@@ -292,6 +353,10 @@ def _publish_instagram(post: dict, env: dict) -> dict:
         raise RuntimeError(
             'Instagram Graph API requires a publicly reachable PUBLIC_BASE_URL (e.g. ngrok or production domain) to fetch the image.'
         )
+
+    base_public = image_url.rsplit('/uploads/', 1)[0] if '/uploads/' in image_url else ''
+    if base_public:
+        image_url = _ensure_jpeg_for_instagram(post, base_public)
 
     token = env['META_PAGE_TOKEN']
     base = f"https://graph.facebook.com/v21.0/{env['META_IG_USER_ID']}"
@@ -321,7 +386,7 @@ def _publish_instagram(post: dict, env: dict) -> dict:
     })
     media_id = published['id']
 
-    permalink = 'https://www.instagram.com/'
+    permalink = env.get('IG_ACCOUNT_URL') if is_valid_http_url(env.get('IG_ACCOUNT_URL') or '') else 'https://www.instagram.com/'
     try:
         info, _ = _call_api(
             'GET',
@@ -425,7 +490,8 @@ def _publish_gmb(post: dict, env: dict) -> dict:
         headers={'Authorization': f"Bearer {tok_data['access_token']}", 'Content-Type': 'application/json'},
         json=body,
     )
-    return {'id': data.get('name'), 'url': data.get('searchUrl') or 'https://business.google.com'}
+    fallback_url = env.get('GMB_ACCOUNT_URL') if is_valid_http_url(env.get('GMB_ACCOUNT_URL') or '') else 'https://business.google.com/'
+    return {'id': data.get('name'), 'url': data.get('searchUrl') or fallback_url}
 
 
 LIVE_ADAPTERS = {
@@ -436,18 +502,21 @@ LIVE_ADAPTERS = {
 }
 
 
-def _sandbox_publish(platform: str, post: dict) -> dict:
+def _sandbox_publish(platform: str, post: dict, env: dict) -> dict:
     time.sleep(0.25 + random.random() * 0.35)
     fail_list = post.get('simulate_failures') or []
     if platform in fail_list or re.search(r'\bFAIL\b', post.get('text') or ''):
         raise RuntimeError(
             f"Simulated {PLATFORM_META[platform]['name']} API error (code 190: authorization token invalid or expired)"
         )
+    meta = PLATFORM_META[platform]
+    raw_url = env.get(meta['accountUrlEnv']) or ''
+    account_url = raw_url if is_valid_http_url(raw_url) else meta['defaultAccountUrl']
     ext_id = f"{platform}_sim_{int(time.time() * 1000)}_{random.randint(100, 999)}"
-    return {'id': ext_id, 'url': f'https://example.com/{platform}/posts/{ext_id}'}
+    return {'id': ext_id, 'url': account_url}
 
 
 def publish(platform: str, post: dict, env: dict) -> dict:
     if env.get('PUBLISH_MODE') == 'live':
         return LIVE_ADAPTERS[platform](post, env)
-    return _sandbox_publish(platform, post)
+    return _sandbox_publish(platform, post, env)

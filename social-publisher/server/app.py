@@ -3,12 +3,13 @@ import json
 import os
 import random
 import string
+import tempfile
 import time
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
 
-from .db import DEFAULT_DB_PATH, Database
+from .db import Database, get_default_db_path
 from .publishers import (
     CONFIGURABLE_ENV_KEYS,
     GMB_CTA_TYPES,
@@ -62,9 +63,18 @@ def create_app(options: dict | None = None) -> Flask:
 
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     public_dir = os.path.join(base_dir, 'public')
-    upload_dir = opts.get('upload_dir') or os.path.join(os.path.dirname(__file__), 'uploads')
-    db_path = opts.get('db_path') or DEFAULT_DB_PATH
+    default_upload_dir = (
+        os.path.join(tempfile.gettempdir(), 'social_publisher_uploads')
+        if os.environ.get('VERCEL')
+        else os.path.join(os.path.dirname(__file__), 'uploads')
+    )
+    upload_dir = opts.get('upload_dir') or default_upload_dir
+    db_path = opts.get('db_path') or get_default_db_path()
     base_env = dict(opts.get('env') if opts.get('env') is not None else os.environ)
+    if os.environ.get('VERCEL') and not base_env.get('PUBLIC_BASE_URL'):
+        vercel_host = os.environ.get('VERCEL_PROJECT_PRODUCTION_URL') or os.environ.get('VERCEL_URL')
+        if vercel_host:
+            base_env['PUBLIC_BASE_URL'] = f'https://{vercel_host}'
     publish_fn = opts.get('publish_fn') or default_publish
 
     os.makedirs(upload_dir, exist_ok=True)

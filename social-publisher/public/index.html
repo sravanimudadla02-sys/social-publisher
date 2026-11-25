@@ -216,9 +216,15 @@
             </details>
 
             <div class="action-bar">
-              <button id="save-draft-btn" type="button" class="btn btn-ghost">Save Draft</button>
-              <button id="preview-btn" type="button" class="btn btn-secondary">Preview Post</button>
-              <button id="publish-btn" type="button" class="btn btn-primary">Submit &amp; Publish</button>
+              <label class="auto-open-opt">
+                <input id="auto-open-accounts" type="checkbox" checked>
+                <span>Open respective accounts on publish</span>
+              </label>
+              <div class="tool-group">
+                <button id="save-draft-btn" type="button" class="btn btn-ghost">Save Draft</button>
+                <button id="preview-btn" type="button" class="btn btn-secondary">Preview Post</button>
+                <button id="publish-btn" type="button" class="btn btn-primary">Submit &amp; Publish</button>
+              </div>
             </div>
           </div>
         </div>
@@ -232,8 +238,12 @@
                 <h2>Publishing Status</h2>
                 <p id="status-subtitle" class="card-desc">Individual delivery results</p>
               </div>
-              <button id="retry-all-btn" type="button" class="btn btn-secondary btn-sm hide">Retry failed</button>
+              <div class="tool-group">
+                <button id="open-all-accounts-btn" type="button" class="btn btn-secondary btn-sm hide">Open Accounts ↗</button>
+                <button id="retry-all-btn" type="button" class="btn btn-secondary btn-sm hide">Retry failed</button>
+              </div>
             </div>
+            <div id="status-notice" class="inline-alert warn hide"></div>
             <div id="status-list" class="status-list"></div>
           </div>
 

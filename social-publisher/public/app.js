@@ -5,6 +5,7 @@
     instagram: {
       name: 'Instagram',
       handle: '@yourbrand',
+      defaultUrl: 'https://www.instagram.com/',
       hint: 'Image required · max 2,200 chars · 30 #tags',
       maxChars: 2200,
       maxHashtags: 30,
@@ -15,6 +16,7 @@
     facebook: {
       name: 'Facebook',
       handle: 'Your Brand Page',
+      defaultUrl: 'https://www.facebook.com/',
       hint: 'Page post · text, links & photo',
       maxChars: 63206,
       requiresImage: false,
@@ -24,6 +26,7 @@
     gmb: {
       name: 'Google Business Profile',
       handle: 'Your Storefront · Google',
+      defaultUrl: 'https://business.google.com/',
       hint: 'Local post + CTA · max 1,500 chars',
       maxChars: 1500,
       requiresImage: false,
@@ -32,7 +35,8 @@
     },
     linkedin: {
       name: 'LinkedIn',
-      handle: 'Your Company · Followers',
+      handle: 'Your Company · LinkedIn',
+      defaultUrl: 'https://www.linkedin.com/feed/',
       hint: 'Professional feed · max 3,000 chars',
       maxChars: 3000,
       requiresImage: false,
@@ -131,6 +135,15 @@
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
   }
 
+  function getAccountInfo(key) {
+    const fallback = PLATFORMS[key];
+    const remote = state.config?.platforms?.[key];
+    return {
+      accountName: remote?.accountName || fallback.handle,
+      accountUrl: remote?.accountUrl || fallback.defaultUrl
+    };
+  }
+
   // Render Platforms
   function renderPlatforms() {
     const textLen = getPlainText().length;
@@ -138,6 +151,7 @@
       const checked = state.selectedPlatforms.includes(key);
       const over = textLen > p.maxChars;
       const missingImg = key === 'instagram' && checked && !state.image;
+      const acct = getAccountInfo(key);
       return `
         <label class="platform-card ${checked ? 'selected' : ''}">
           <input type="checkbox" value="${key}" ${checked ? 'checked' : ''}>
@@ -149,6 +163,13 @@
             <div class="platform-hint">${p.hint}</div>
             <div class="platform-meter ${over || missingImg ? 'over' : ''}">
               ${textLen.toLocaleString()} / ${p.maxChars.toLocaleString()} chars${missingImg ? ' · Image needed' : ''}
+            </div>
+            <div class="platform-account-row">
+              <span class="plat-account-name" title="${esc(acct.accountName)}">${esc(acct.accountName)}</span>
+              <div class="plat-actions">
+                <a class="plat-link" href="${esc(acct.accountUrl)}" target="_blank" rel="noopener" title="Open ${esc(p.name)} account">Open ↗</a>
+                <button type="button" class="plat-cfg-btn" data-cfg-platform="${key}">Set account</button>
+              </div>
             </div>
           </div>
         </label>
@@ -167,6 +188,18 @@
         }
         renderPlatforms();
         renderPreviews();
+      };
+    });
+
+    $('platform-list').querySelectorAll('.plat-link').forEach(link => {
+      link.onclick = e => e.stopPropagation();
+    });
+
+    $('platform-list').querySelectorAll('.plat-cfg-btn').forEach(btn => {
+      btn.onclick = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        openConfigModal(btn.dataset.cfgPlatform);
       };
     });
   }
@@ -303,13 +336,14 @@
       ? `<div class="mock-body">${formatPreviewText(text)}</div>`
       : `<div class="mock-body" style="color:var(--ink-light);font-style:italic">No caption text yet…</div>`;
 
+    const acct = getAccountInfo(key);
     return `
       <div class="mock-card">
         <div class="mock-head">
           <div class="platform-icon ${p.iconClass}">${p.svg}</div>
           <div>
             <div class="mock-author">${p.name}</div>
-            <div class="mock-sub">${p.handle} · Preview</div>
+            <div class="mock-sub">${esc(acct.accountName)} · Preview</div>
           </div>
         </div>
         ${key === 'instagram' ? mediaBlock + bodyText : bodyText + mediaBlock}
@@ -395,6 +429,23 @@
     return `<span class="badge ${status}">${label}</span>`;
   }
 
+  function openPublishedUrls(results) {
+    const succeeded = results.filter(r => r.status === 'success');
+    let blocked = 0;
+    succeeded.forEach(r => {
+      const targetUrl = r.url || getAccountInfo(r.platform).accountUrl;
+      const win = window.open(targetUrl, '_blank', 'noopener');
+      if (!win) blocked += 1;
+    });
+    const notice = $('status-notice');
+    if (blocked > 0) {
+      notice.textContent = `Your browser blocked ${blocked} popup tab(s). Click "Open Accounts ↗" or each platform button below to open them.`;
+      notice.classList.remove('hide');
+    } else {
+      notice.classList.add('hide');
+    }
+  }
+
   function renderPublishStatus(post) {
     state.lastPublishPost = post;
     const card = $('status-card');
@@ -402,13 +453,17 @@
     card.classList.remove('hide');
 
     const hasFailures = post.results.some(r => r.status === 'failed');
+    const succeeded = post.results.filter(r => r.status === 'success');
     $('retry-all-btn').classList.toggle('hide', !hasFailures);
+    $('open-all-accounts-btn').classList.toggle('hide', succeeded.length === 0);
 
-    const okCount = post.results.filter(r => r.status === 'success').length;
-    $('status-subtitle').textContent = `${okCount} of ${post.results.length} platform(s) succeeded`;
+    $('status-subtitle').textContent = `${succeeded.length} of ${post.results.length} platform(s) succeeded`;
 
     list.innerHTML = post.results.map(r => {
       const p = PLATFORMS[r.platform];
+      const acct = getAccountInfo(r.platform);
+      const postUrl = r.url || acct.accountUrl;
+      const showSeparateAcct = r.status === 'success' && postUrl !== acct.accountUrl;
       return `
         <div class="status-item">
           <div class="status-row">
@@ -419,17 +474,19 @@
             ${statusBadge(r.status)}
           </div>
           ${r.status === 'success' ? `
-            <div class="status-detail">ID: <code>${esc(r.external_id || 'published')}</code></div>
+            <div class="status-detail">Account: <strong>${esc(acct.accountName)}</strong> · ID: <code>${esc(r.external_id || 'published')}</code></div>
             <div class="status-actions">
-              <a href="${esc(r.url)}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">View post ↗</a>
+              <a href="${esc(postUrl)}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">Open in ${p.name} ↗</a>
+              ${showSeparateAcct ? `<a href="${esc(acct.accountUrl)}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">Open Account ↗</a>` : ''}
             </div>
           ` : r.status === 'failed' ? `
             <div class="status-detail err">${esc(r.error)}</div>
             <div class="status-actions">
               <button type="button" class="btn btn-secondary btn-sm retry-one-btn" data-id="${post.id}" data-platform="${r.platform}">Retry ${p.name}</button>
+              <a href="${esc(acct.accountUrl)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Open Account ↗</a>
             </div>
           ` : `
-            <div class="status-detail">Sending request to ${p.name}…</div>
+            <div class="status-detail">Sending request to ${p.name} (${esc(acct.accountName)})…</div>
           `}
         </div>
       `;
@@ -475,6 +532,8 @@
 
     // Show immediate pending status cards
     $('status-card').classList.remove('hide');
+    $('status-notice').classList.add('hide');
+    $('open-all-accounts-btn').classList.add('hide');
     $('retry-all-btn').classList.add('hide');
     $('status-subtitle').textContent = `Publishing to ${platforms.length} platform(s)…`;
     $('status-list').innerHTML = platforms.map(k => `
@@ -511,6 +570,9 @@
       if (!res.ok) throw new Error(data.error || 'Publishing failed.');
       state.editingDraftId = null;
       renderPublishStatus(data);
+      if ($('auto-open-accounts')?.checked) {
+        openPublishedUrls(data.results || []);
+      }
       await Promise.all([loadHistory(), loadHealth()]);
     } catch (err) {
       showError(err.message);
@@ -750,51 +812,89 @@
           };
         });
       }
+      renderPlatforms();
+      renderPreviews();
     } catch {
       $('mode-pill-text').textContent = 'Offline';
     }
   }
 
-  function openConfigModal() {
+  function openConfigModal(focusPlatform = null) {
     const cfg = state.config;
     const fields = cfg.fields || {};
-    const rows = Object.values(cfg.platforms || {}).map(p => `
-      <div class="cfg-row">
-        <div class="cfg-head">
-          <strong>${esc(p.name)}</strong>
-          <span class="badge ${p.configured ? 'success' : 'pending'}">${p.configured ? 'Credentials Ready' : 'Not Configured'}</span>
-        </div>
-        <div class="cfg-env">
-          ${p.configured
-        ? 'All required credentials are saved.'
-        : `Missing: ${p.missingEnv.map(k => `<code>${esc(k)}</code>`).join(', ')}`}
-        </div>
-      </div>
-    `).join('');
 
-    const credFields = [
-      ['META_PAGE_ID', 'Facebook Page ID'],
-      ['META_PAGE_TOKEN', 'Meta Page Access Token (Facebook & Instagram)'],
-      ['META_IG_USER_ID', 'Instagram Business Account ID'],
-      ['LINKEDIN_TOKEN', 'LinkedIn OAuth Bearer Token'],
-      ['LINKEDIN_AUTHOR_URN', 'LinkedIn Author URN (urn:li:person:...)'],
-      ['GOOGLE_CLIENT_ID', 'Google OAuth Client ID'],
-      ['GOOGLE_CLIENT_SECRET', 'Google OAuth Client Secret'],
-      ['GOOGLE_REFRESH_TOKEN', 'Google OAuth Refresh Token'],
-      ['GMB_ACCOUNT_ID', 'GMB Account ID'],
-      ['GMB_LOCATION_ID', 'GMB Location ID']
+    const platformSections = [
+      {
+        key: 'instagram',
+        accountFields: [
+          ['IG_ACCOUNT_NAME', 'Instagram Handle / Display Name (e.g. @yourshop)'],
+          ['IG_ACCOUNT_URL', 'Instagram Account URL (e.g. https://www.instagram.com/yourshop/)']
+        ],
+        apiFields: [
+          ['META_IG_USER_ID', 'Instagram Business Account ID'],
+          ['META_PAGE_TOKEN', 'Meta Page Access Token (shared with Facebook)']
+        ]
+      },
+      {
+        key: 'facebook',
+        accountFields: [
+          ['FB_ACCOUNT_NAME', 'Facebook Page Name'],
+          ['FB_ACCOUNT_URL', 'Facebook Page URL (e.g. https://www.facebook.com/yourpage/)']
+        ],
+        apiFields: [
+          ['META_PAGE_ID', 'Facebook Page ID'],
+          ['META_PAGE_TOKEN', 'Meta Page Access Token']
+        ]
+      },
+      {
+        key: 'gmb',
+        accountFields: [
+          ['GMB_ACCOUNT_NAME', 'Business Profile Name'],
+          ['GMB_ACCOUNT_URL', 'Google Business Profile URL (e.g. https://business.google.com/)']
+        ],
+        apiFields: [
+          ['GOOGLE_CLIENT_ID', 'Google OAuth Client ID'],
+          ['GOOGLE_CLIENT_SECRET', 'Google OAuth Client Secret'],
+          ['GOOGLE_REFRESH_TOKEN', 'Google OAuth Refresh Token'],
+          ['GMB_ACCOUNT_ID', 'GMB Account ID'],
+          ['GMB_LOCATION_ID', 'GMB Location ID']
+        ]
+      },
+      {
+        key: 'linkedin',
+        accountFields: [
+          ['LINKEDIN_ACCOUNT_NAME', 'LinkedIn Profile / Company Name'],
+          ['LINKEDIN_ACCOUNT_URL', 'LinkedIn Profile / Company URL (e.g. https://www.linkedin.com/in/yourname/)']
+        ],
+        apiFields: [
+          ['LINKEDIN_TOKEN', 'LinkedIn OAuth Bearer Token'],
+          ['LINKEDIN_AUTHOR_URN', 'LinkedIn Author URN (urn:li:person:...)']
+        ]
+      }
     ];
+
+    const renderInput = ([k, label]) => {
+      const info = fields[k] || {};
+      const placeholder = info.isSet
+        ? `Saved (${info.preview}) — leave blank to keep`
+        : `Enter ${k}`;
+      return `
+        <div class="cfg-field">
+          <label for="cfg-${k}">${esc(label)} <code>${k}</code></label>
+          <input id="cfg-${k}" data-envkey="${k}" type="${info.isSecret ? 'password' : 'text'}" value="${!info.isSecret ? esc(info.preview || '') : ''}" placeholder="${esc(placeholder)}">
+        </div>
+      `;
+    };
 
     $('config-modal-body').innerHTML = `
       <p style="margin-top:0;font-size:0.84rem;color:var(--ink-muted)">
-        Settings saved here are persisted in the SQLite database (<code>settings</code> table) and override <code>.env</code> defaults immediately.
+        Connect each platform's <strong>Account URL</strong> (used when opening your account directly or after posting) and <strong>Official API Credentials</strong>. Saved in SQLite <code>settings</code>.
       </p>
-      ${rows}
       <form id="config-form" class="cfg-form-grid">
         <div class="cfg-field">
           <label for="cfg-mode">Publishing Mode</label>
           <select id="cfg-mode">
-            <option value="sandbox" ${cfg.mode === 'sandbox' ? 'selected' : ''}>Sandbox (Simulated APIs)</option>
+            <option value="sandbox" ${cfg.mode === 'sandbox' ? 'selected' : ''}>Sandbox (Simulated APIs + Open Connected Accounts)</option>
             <option value="live" ${cfg.mode === 'live' ? 'selected' : ''}>Live (Official Platform APIs)</option>
           </select>
         </div>
@@ -802,21 +902,31 @@
           <label for="cfg-base-url">Public Base URL (needed by Instagram &amp; GMB to fetch images)</label>
           <input id="cfg-base-url" type="url" value="${esc(cfg.publicBaseUrl || '')}" placeholder="https://your-domain.com">
         </div>
-        ${credFields.map(([k, label]) => {
-      const info = fields[k] || {};
-      const placeholder = info.isSet
-        ? `Saved (${info.preview}) — leave blank to keep`
-        : `Enter ${k}`;
+
+        ${platformSections.map(sec => {
+      const pMeta = cfg.platforms?.[sec.key] || {};
+      const acct = getAccountInfo(sec.key);
+      const isFocused = focusPlatform === sec.key;
       return `
-            <div class="cfg-field">
-              <label for="cfg-${k}">${esc(label)} <code>${k}</code></label>
-              <input id="cfg-${k}" data-envkey="${k}" type="${info.isSecret ? 'password' : 'text'}" value="${!info.isSecret ? esc(info.preview || '') : ''}" placeholder="${esc(placeholder)}">
+            <div id="cfg-section-${sec.key}" class="cfg-row ${isFocused ? 'focused' : ''}">
+              <div class="cfg-head">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <strong>${esc(PLATFORMS[sec.key].name)}</strong>
+                  <a class="plat-link" href="${esc(acct.accountUrl)}" target="_blank" rel="noopener">Open ↗</a>
+                </div>
+                <span class="badge ${pMeta.configured ? 'success' : 'pending'}">${pMeta.configured ? 'API Ready' : 'Account / Sandbox'}</span>
+              </div>
+              <div class="cfg-form-grid">
+                ${sec.accountFields.map(renderInput).join('')}
+                ${sec.apiFields.map(renderInput).join('')}
+              </div>
             </div>
           `;
     }).join('')}
+
         <div class="modal-actions">
           <button type="button" id="cancel-config-btn" class="btn btn-secondary btn-sm">Cancel</button>
-          <button type="submit" class="btn btn-primary btn-sm">Save Settings to DB</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save Accounts &amp; Settings</button>
         </div>
       </form>
     `;
@@ -845,6 +955,10 @@
     };
 
     $('config-modal').classList.remove('hide');
+    if (focusPlatform) {
+      const target = document.getElementById(`cfg-section-${focusPlatform}`);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
   }
 
   function setCategory(cat) {
@@ -969,6 +1083,9 @@
 
   $('save-draft-btn').onclick = saveDraft;
   $('publish-btn').onclick = publishPost;
+  $('open-all-accounts-btn').onclick = () => {
+    if (state.lastPublishPost) openPublishedUrls(state.lastPublishPost.results || []);
+  };
   $('retry-all-btn').onclick = () => {
     if (state.lastPublishPost) retryPost(state.lastPublishPost.id);
   };
@@ -982,7 +1099,7 @@
   $('filter-platform').onchange = loadHistory;
   $('filter-status').onchange = loadHistory;
 
-  $('mode-pill').onclick = openConfigModal;
+  $('mode-pill').onclick = () => openConfigModal();
   $('close-config-modal').onclick = () => $('config-modal').classList.add('hide');
   $('config-modal').onclick = e => {
     if (e.target === $('config-modal')) $('config-modal').classList.add('hide');
