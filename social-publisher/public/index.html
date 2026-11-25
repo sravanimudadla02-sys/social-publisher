@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Social Publisher — Multi-Platform Publishing Module</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.snow.css">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 2L11 13"></path>
+            <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
+          </svg>
+        </div>
+        <div>
+          <h1>Social Publisher</h1>
+          <p class="subtitle">Create once, preview per network, and publish simultaneously</p>
+        </div>
+      </div>
+
+      <nav class="nav-tabs" aria-label="Primary navigation">
+        <button id="tab-compose" class="nav-btn active" type="button">
+          <span>Compose &amp; Publish</span>
+        </button>
+        <button id="tab-history" class="nav-btn" type="button">
+          <span>Publishing History</span>
+          <span id="history-count-pill" class="count-pill">0</span>
+        </button>
+      </nav>
+
+      <div class="topbar-actions">
+        <span id="db-pill" class="db-pill" title="SQLite database status">
+          <span class="dot"></span>
+          <span id="db-pill-text">Connecting DB…</span>
+        </span>
+        <button id="mode-pill" class="mode-pill" type="button" title="Configure official APIs &amp; mode">
+          <span class="dot"></span>
+          <span id="mode-pill-text">Checking mode…</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- COMPOSE VIEW -->
+    <section id="view-compose" class="view-section">
+      <div class="compose-layout">
+        <!-- LEFT COLUMN: Editor, Media, Hashtags, Platforms -->
+        <div class="compose-main">
+          <!-- Category & Quick Templates -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>1. Post Type &amp; Templates</h2>
+                <p class="card-desc">Choose a post category or start from a database template.</p>
+              </div>
+              <div class="tool-group">
+                <button id="save-template-btn" class="btn btn-secondary btn-sm" type="button">Save as Template</button>
+                <button id="clear-editor-btn" class="btn btn-ghost btn-sm" type="button">Reset</button>
+              </div>
+            </div>
+
+            <div class="category-row" role="group" aria-label="Post category">
+              <button type="button" class="chip active" data-category="promotional">Promotional</button>
+              <button type="button" class="chip" data-category="festival">Festival Wishes</button>
+              <button type="button" class="chip" data-category="announcement">Announcement</button>
+              <button type="button" class="chip" data-category="general">General</button>
+            </div>
+
+            <div class="template-bar" id="template-bar">
+              <span class="label-inline">Templates:</span>
+              <span class="label-inline" id="template-loading">Loading…</span>
+            </div>
+          </div>
+
+          <!-- Rich Text Editor + Emoji + Hashtags + Links -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>2. Rich Text Content</h2>
+                <p class="card-desc">Format text, insert emojis, add #hashtags and links.</p>
+              </div>
+              <div class="metrics-inline">
+                <span id="char-count" class="metric-badge">0 chars</span>
+                <span id="hashtag-count" class="metric-badge">0 hashtags</span>
+              </div>
+            </div>
+
+            <div class="editor-shell">
+              <div id="editor"></div>
+            </div>
+
+            <!-- Action Toolbar below editor -->
+            <div class="editor-tools">
+              <div class="tool-group">
+                <button id="toggle-emoji-btn" type="button" class="btn btn-secondary btn-sm">
+                  <span>😊 Emojis</span>
+                </button>
+                <button id="toggle-hashtag-btn" type="button" class="btn btn-secondary btn-sm">
+                  <span># Hashtags</span>
+                </button>
+                <button id="open-link-btn" type="button" class="btn btn-secondary btn-sm">
+                  <span>🔗 Insert Link</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Emoji Picker Drawer -->
+            <div id="emoji-drawer" class="drawer hide">
+              <div class="drawer-tabs" id="emoji-tabs"></div>
+              <div class="emoji-grid" id="emoji-grid"></div>
+            </div>
+
+            <!-- Hashtag Assistant Drawer -->
+            <div id="hashtag-drawer" class="drawer hide">
+              <div class="hashtag-input-row">
+                <input id="custom-hashtag-input" type="text" placeholder="Type a hashtag (e.g. FestiveSale) and press Enter">
+                <button id="add-hashtag-btn" type="button" class="btn btn-primary btn-sm">Add #tag</button>
+              </div>
+              <div class="hashtag-packs" id="hashtag-packs"></div>
+            </div>
+
+            <!-- Link Insertion Panel -->
+            <div id="link-drawer" class="drawer hide">
+              <div class="link-form-grid">
+                <input id="link-text-input" type="text" placeholder="Link label (e.g. Shop Now)">
+                <input id="link-url-input" type="url" placeholder="https://yourstore.com/offer">
+                <button id="insert-link-confirm" type="button" class="btn btn-primary btn-sm">Insert</button>
+              </div>
+            </div>
+
+            <!-- Detected Hashtags & Links Summary -->
+            <div id="detected-meta" class="detected-meta hide">
+              <div id="detected-hashtags" class="pill-list"></div>
+            </div>
+
+            <!-- Image Upload Dropzone -->
+            <div class="upload-section">
+              <div class="section-subhead">
+                <span class="subhead-title">Media Attachment</span>
+                <span class="subhead-hint">JPG, PNG, or WebP up to 8 MB (required for Instagram)</span>
+              </div>
+              <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Upload image">
+                <input id="file-input" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+                <div id="dropzone-empty" class="dropzone-empty">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                    <polyline points="21 15 16 10 5 21"></polyline>
+                  </svg>
+                  <p><strong>Click to upload</strong> or drag and drop an image here</p>
+                </div>
+                <div id="dropzone-preview" class="dropzone-preview hide">
+                  <img id="thumb-img" alt="Uploaded post media">
+                  <div class="thumb-info">
+                    <div id="thumb-name" class="thumb-name"></div>
+                    <div id="thumb-meta" class="thumb-meta"></div>
+                    <div class="thumb-actions">
+                      <button id="replace-img-btn" type="button" class="btn btn-secondary btn-sm">Replace</button>
+                      <button id="remove-img-btn" type="button" class="btn btn-danger-ghost btn-sm">Remove</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Google Business Profile Call-to-Action (Optional) -->
+            <div class="cta-section">
+              <div class="section-subhead">
+                <span class="subhead-title">Google Business Profile CTA <small>(optional)</small></span>
+              </div>
+              <div class="cta-grid">
+                <select id="cta-type" aria-label="Call to action button">
+                  <option value="">No CTA button</option>
+                  <option value="LEARN_MORE">Learn more</option>
+                  <option value="SHOP">Shop</option>
+                  <option value="ORDER">Order online</option>
+                  <option value="BOOK">Book</option>
+                  <option value="SIGN_UP">Sign up</option>
+                </select>
+                <input id="cta-url" type="url" placeholder="https://example.com/landing-page">
+              </div>
+            </div>
+
+            <div id="composer-error" class="inline-alert error hide" role="alert"></div>
+          </div>
+
+          <!-- Platform Selector -->
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>3. Select Target Platforms</h2>
+                <p class="card-desc">Publish simultaneously across all chosen networks.</p>
+              </div>
+              <div class="tool-group">
+                <button id="select-all-btn" type="button" class="btn btn-ghost btn-sm">Select all</button>
+                <button id="clear-all-btn" type="button" class="btn btn-ghost btn-sm">Clear</button>
+              </div>
+            </div>
+
+            <div id="platform-list" class="platform-grid"></div>
+
+            <!-- Sandbox Test Helper (visible only in sandbox mode) -->
+            <details id="sandbox-helper" class="sandbox-helper hide">
+              <summary>Sandbox testing options (simulate partial failures)</summary>
+              <p class="sandbox-note">Toggle any platform below (or include the word <code>FAIL</code> in your post) to test individual failure &amp; retry behavior.</p>
+              <div id="sim-fail-checks" class="sim-fail-checks"></div>
+            </details>
+
+            <div class="action-bar">
+              <button id="save-draft-btn" type="button" class="btn btn-ghost">Save Draft</button>
+              <button id="preview-btn" type="button" class="btn btn-secondary">Preview Post</button>
+              <button id="publish-btn" type="button" class="btn btn-primary">Submit &amp; Publish</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN: Live Previews & Publishing Status -->
+        <aside class="compose-sidebar">
+          <!-- Publishing Status Card -->
+          <div id="status-card" class="card hide">
+            <div class="card-header">
+              <div>
+                <h2>Publishing Status</h2>
+                <p id="status-subtitle" class="card-desc">Individual delivery results</p>
+              </div>
+              <button id="retry-all-btn" type="button" class="btn btn-secondary btn-sm hide">Retry failed</button>
+            </div>
+            <div id="status-list" class="status-list"></div>
+          </div>
+
+          <!-- Post Preview Card -->
+          <div id="preview-card" class="card">
+            <div class="card-header">
+              <div>
+                <h2>Post Preview</h2>
+                <p class="card-desc">Platform-specific preview before publishing</p>
+              </div>
+            </div>
+
+            <div id="preview-tabs" class="preview-tabs"></div>
+            <div id="preview-stage" class="preview-stage">
+              <div class="empty-state">
+                <p>Select one or more platforms and click <strong>Preview Post</strong> (or start typing) to inspect how your post will appear.</p>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- HISTORY VIEW -->
+    <section id="view-history" class="view-section hide">
+      <div class="stats-row" id="history-stats">
+        <div class="stat-card"><span class="stat-label">Total Posts</span><strong id="stat-total">0</strong></div>
+        <div class="stat-card"><span class="stat-label">Successful Deliveries</span><strong id="stat-success" class="text-ok">0</strong></div>
+        <div class="stat-card"><span class="stat-label">Failed Deliveries</span><strong id="stat-failed" class="text-bad">0</strong></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header history-header">
+          <div>
+            <h2>Publishing History</h2>
+            <p class="card-desc">Track every post, inspect per-platform outcomes, and retry failures.</p>
+          </div>
+          <div class="history-filters">
+            <select id="filter-post-status" aria-label="View published or drafts">
+              <option value="published">Published posts</option>
+              <option value="draft">Saved drafts</option>
+              <option value="all">All records</option>
+            </select>
+            <input id="history-search" type="search" placeholder="Search posts or #hashtags…">
+            <select id="filter-category" aria-label="Filter by category">
+              <option value="">All types</option>
+              <option value="promotional">Promotional</option>
+              <option value="festival">Festival Wishes</option>
+              <option value="announcement">Announcement</option>
+              <option value="general">General</option>
+            </select>
+            <select id="filter-platform" aria-label="Filter by platform">
+              <option value="">All platforms</option>
+              <option value="instagram">Instagram</option>
+              <option value="facebook">Facebook</option>
+              <option value="gmb">Google Business Profile</option>
+              <option value="linkedin">LinkedIn</option>
+            </select>
+            <select id="filter-status" aria-label="Filter by status">
+              <option value="">All statuses</option>
+              <option value="success">Success</option>
+              <option value="failed">Failed</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="history-list" class="history-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- API Configuration Modal -->
+  <div id="config-modal" class="modal-backdrop hide" role="dialog" aria-modal="true" aria-labelledby="config-modal-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="config-modal-title">Official API Configuration</h2>
+        <button id="close-config-modal" type="button" class="icon-close" aria-label="Close modal">&times;</button>
+      </div>
+      <div id="config-modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/quill/1.3.7/quill.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

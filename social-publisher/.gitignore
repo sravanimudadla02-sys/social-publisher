@@ -1,0 +1,16 @@
+# Environment & secrets
+.env
+
+# SQLite database & uploaded media
+server/data.db
+server/data.db-shm
+server/data.db-wal
+server/uploads/*
+!server/uploads/.gitkeep
+
+# Python caches & virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
