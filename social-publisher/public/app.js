@@ -429,7 +429,7 @@
     return `<span class="badge ${status}">${label}</span>`;
   }
 
-  function openPublishedUrls(results) {
+  function openPublishedUrls(results, copiedCaption = false) {
     const succeeded = results.filter(r => r.status === 'success');
     let blocked = 0;
     succeeded.forEach(r => {
@@ -439,7 +439,10 @@
     });
     const notice = $('status-notice');
     if (blocked > 0) {
-      notice.textContent = `Your browser blocked ${blocked} popup tab(s). Click "Open Accounts ↗" or each platform button below to open them.`;
+      notice.textContent = `${copiedCaption ? 'Caption copied to clipboard, but your ' : 'Your '}browser blocked ${blocked} popup tab(s). Click "Open Accounts ↗" or each platform button below.`;
+      notice.classList.remove('hide');
+    } else if (copiedCaption) {
+      notice.textContent = 'Caption copied to clipboard — paste it into the opened account page to post your photo.';
       notice.classList.remove('hide');
     } else {
       notice.classList.add('hide');
@@ -570,8 +573,21 @@
       if (!res.ok) throw new Error(data.error || 'Publishing failed.');
       state.editingDraftId = null;
       renderPublishStatus(data);
+      let copied = false;
+      if (state.config?.mode !== 'live' && text && navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(text);
+          copied = true;
+        } catch {
+          // Clipboard permission optional
+        }
+      }
       if ($('auto-open-accounts')?.checked) {
-        openPublishedUrls(data.results || []);
+        openPublishedUrls(data.results || [], copied);
+      } else if (copied) {
+        const notice = $('status-notice');
+        notice.textContent = 'Caption copied to clipboard — click Open in Platform ↗ below to paste and post.';
+        notice.classList.remove('hide');
       }
       await Promise.all([loadHistory(), loadHealth()]);
     } catch (err) {
@@ -819,6 +835,34 @@
     }
   }
 
+  function normalizeProfileInput(key, raw) {
+    const val = (raw || '').trim();
+    if (!val) return null;
+
+    if (/^https?:\/\//i.test(val)) {
+      try {
+        const u = new URL(val);
+        const seg = u.pathname.split('/').filter(Boolean).pop() || u.hostname;
+        const name = key === 'instagram' ? `@${seg.replace(/^@/, '')}` : seg;
+        return { name, url: val };
+      } catch {
+        return { name: val, url: PLATFORMS[key].defaultUrl };
+      }
+    }
+
+    const clean = val.replace(/^@+/, '').replace(/\s+/g, '');
+    if (key === 'instagram') {
+      return { name: `@${clean}`, url: `https://www.instagram.com/${clean}/` };
+    }
+    if (key === 'facebook') {
+      return { name: val, url: `https://www.facebook.com/${clean}/` };
+    }
+    if (key === 'linkedin') {
+      return { name: val, url: `https://www.linkedin.com/in/${clean}/` };
+    }
+    return { name: val, url: PLATFORMS.gmb.defaultUrl };
+  }
+
   function openConfigModal(focusPlatform = null) {
     const cfg = state.config;
     const fields = cfg.fields || {};
@@ -826,10 +870,9 @@
     const platformSections = [
       {
         key: 'instagram',
-        accountFields: [
-          ['IG_ACCOUNT_NAME', 'Instagram Handle / Display Name (e.g. @yourshop)'],
-          ['IG_ACCOUNT_URL', 'Instagram Account URL (e.g. https://www.instagram.com/yourshop/)']
-        ],
+        placeholder: '@yourshop or https://www.instagram.com/yourshop/',
+        nameEnv: 'IG_ACCOUNT_NAME',
+        urlEnv: 'IG_ACCOUNT_URL',
         apiFields: [
           ['META_IG_USER_ID', 'Instagram Business Account ID'],
           ['META_PAGE_TOKEN', 'Meta Page Access Token (shared with Facebook)']
@@ -837,10 +880,9 @@
       },
       {
         key: 'facebook',
-        accountFields: [
-          ['FB_ACCOUNT_NAME', 'Facebook Page Name'],
-          ['FB_ACCOUNT_URL', 'Facebook Page URL (e.g. https://www.facebook.com/yourpage/)']
-        ],
+        placeholder: 'Your Page name or https://www.facebook.com/yourpage/',
+        nameEnv: 'FB_ACCOUNT_NAME',
+        urlEnv: 'FB_ACCOUNT_URL',
         apiFields: [
           ['META_PAGE_ID', 'Facebook Page ID'],
           ['META_PAGE_TOKEN', 'Meta Page Access Token']
@@ -848,10 +890,9 @@
       },
       {
         key: 'gmb',
-        accountFields: [
-          ['GMB_ACCOUNT_NAME', 'Business Profile Name'],
-          ['GMB_ACCOUNT_URL', 'Google Business Profile URL (e.g. https://business.google.com/)']
-        ],
+        placeholder: 'Business name or https://business.google.com/...',
+        nameEnv: 'GMB_ACCOUNT_NAME',
+        urlEnv: 'GMB_ACCOUNT_URL',
         apiFields: [
           ['GOOGLE_CLIENT_ID', 'Google OAuth Client ID'],
           ['GOOGLE_CLIENT_SECRET', 'Google OAuth Client Secret'],
@@ -862,10 +903,9 @@
       },
       {
         key: 'linkedin',
-        accountFields: [
-          ['LINKEDIN_ACCOUNT_NAME', 'LinkedIn Profile / Company Name'],
-          ['LINKEDIN_ACCOUNT_URL', 'LinkedIn Profile / Company URL (e.g. https://www.linkedin.com/in/yourname/)']
-        ],
+        placeholder: 'yourname or https://www.linkedin.com/in/yourname/',
+        nameEnv: 'LINKEDIN_ACCOUNT_NAME',
+        urlEnv: 'LINKEDIN_ACCOUNT_URL',
         apiFields: [
           ['LINKEDIN_TOKEN', 'LinkedIn OAuth Bearer Token'],
           ['LINKEDIN_AUTHOR_URN', 'LinkedIn Author URN (urn:li:person:...)']
@@ -888,45 +928,64 @@
 
     $('config-modal-body').innerHTML = `
       <p style="margin-top:0;font-size:0.84rem;color:var(--ink-muted)">
-        Connect each platform's <strong>Account URL</strong> (used when opening your account directly or after posting) and <strong>Official API Credentials</strong>. Saved in SQLite <code>settings</code>.
+        Enter your <strong>profile handle or link</strong> for each platform so clicking <strong>Open ↗</strong> or <strong>Submit &amp; Publish</strong> opens your exact account directly.
       </p>
       <form id="config-form" class="cfg-form-grid">
-        <div class="cfg-field">
-          <label for="cfg-mode">Publishing Mode</label>
-          <select id="cfg-mode">
-            <option value="sandbox" ${cfg.mode === 'sandbox' ? 'selected' : ''}>Sandbox (Simulated APIs + Open Connected Accounts)</option>
-            <option value="live" ${cfg.mode === 'live' ? 'selected' : ''}>Live (Official Platform APIs)</option>
-          </select>
-        </div>
-        <div class="cfg-field">
-          <label for="cfg-base-url">Public Base URL (needed by Instagram &amp; GMB to fetch images)</label>
-          <input id="cfg-base-url" type="url" value="${esc(cfg.publicBaseUrl || '')}" placeholder="https://your-domain.com">
-        </div>
-
         ${platformSections.map(sec => {
-      const pMeta = cfg.platforms?.[sec.key] || {};
-      const acct = getAccountInfo(sec.key);
-      const isFocused = focusPlatform === sec.key;
-      return `
+          const pMeta = cfg.platforms?.[sec.key] || {};
+          const acct = getAccountInfo(sec.key);
+          const isFocused = focusPlatform === sec.key;
+          const savedProfile = fields[sec.urlEnv]?.isSet
+            ? fields[sec.urlEnv].preview
+            : (fields[sec.nameEnv]?.isSet ? fields[sec.nameEnv].preview : '');
+          return `
             <div id="cfg-section-${sec.key}" class="cfg-row ${isFocused ? 'focused' : ''}">
               <div class="cfg-head">
                 <div style="display:flex;align-items:center;gap:8px">
                   <strong>${esc(PLATFORMS[sec.key].name)}</strong>
                   <a class="plat-link" href="${esc(acct.accountUrl)}" target="_blank" rel="noopener">Open ↗</a>
                 </div>
-                <span class="badge ${pMeta.configured ? 'success' : 'pending'}">${pMeta.configured ? 'API Ready' : 'Account / Sandbox'}</span>
+                <span class="badge ${pMeta.configured ? 'success' : 'pending'}">${pMeta.configured ? 'Auto-API Ready' : 'Profile Link'}</span>
               </div>
-              <div class="cfg-form-grid">
-                ${sec.accountFields.map(renderInput).join('')}
-                ${sec.apiFields.map(renderInput).join('')}
+              <div class="cfg-field">
+                <label for="cfg-profile-${sec.key}">Profile Handle or Link</label>
+                <input id="cfg-profile-${sec.key}" data-profile-for="${sec.key}" type="text" value="${esc(savedProfile)}" placeholder="${esc(sec.placeholder)}">
               </div>
             </div>
           `;
-    }).join('')}
+        }).join('')}
+
+        <details class="sandbox-helper">
+          <summary>Advanced: Automated Official API Posting (optional developer tokens)</summary>
+          <p class="sandbox-note">
+            To auto-publish in the background without opening tabs, switch to <strong>Live</strong> mode and provide official API credentials for that platform.
+          </p>
+          <div class="cfg-form-grid">
+            <div class="cfg-field">
+              <label for="cfg-mode">Publishing Mode</label>
+              <select id="cfg-mode">
+                <option value="sandbox" ${cfg.mode === 'sandbox' ? 'selected' : ''}>Profile Link + Copy Caption (Sandbox)</option>
+                <option value="live" ${cfg.mode === 'live' ? 'selected' : ''}>Live (Official Platform APIs)</option>
+              </select>
+            </div>
+            <div class="cfg-field">
+              <label for="cfg-base-url">Public Base URL (needed by Instagram &amp; GMB APIs)</label>
+              <input id="cfg-base-url" type="url" value="${esc(cfg.publicBaseUrl || '')}" placeholder="https://your-domain.com">
+            </div>
+            ${platformSections.map(sec => `
+              <div class="cfg-row">
+                <div class="cfg-head"><strong>${esc(PLATFORMS[sec.key].name)} API</strong></div>
+                <div class="cfg-form-grid">
+                  ${sec.apiFields.map(renderInput).join('')}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </details>
 
         <div class="modal-actions">
           <button type="button" id="cancel-config-btn" class="btn btn-secondary btn-sm">Cancel</button>
-          <button type="submit" class="btn btn-primary btn-sm">Save Accounts &amp; Settings</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save Accounts</button>
         </div>
       </form>
     `;
@@ -935,6 +994,16 @@
     $('config-form').onsubmit = async e => {
       e.preventDefault();
       const values = {};
+
+      platformSections.forEach(sec => {
+        const raw = $(`cfg-profile-${sec.key}`)?.value || '';
+        const parsed = normalizeProfileInput(sec.key, raw);
+        if (parsed) {
+          values[sec.nameEnv] = parsed.name;
+          values[sec.urlEnv] = parsed.url;
+        }
+      });
+
       $('config-form').querySelectorAll('[data-envkey]').forEach(input => {
         const val = input.value.trim();
         if (val) values[input.dataset.envkey] = val;
